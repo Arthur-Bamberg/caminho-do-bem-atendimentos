@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { consultarCadastros, baixarPDF, lerCatalogos, type Cadastro, type Catalogos } from "./api";
+import { formatarCPF, formatarDataBR } from "./formatacao";
 
 function nomeUnidade(id: string, cat: Catalogos) {
   return cat.unidades.find((u) => u.id === id)?.nome ?? (id || "—");
@@ -128,10 +129,10 @@ export function ConsultaPage() {
                   <td>{c.nome_exibicao}</td>
                   <td>{nomeUnidade(c.unidade_id, catalogos)}</td>
                   <td>{nomesOficinas(c.oficinas, catalogos)}</td>
-                  <td>{c.cpf || "—"}</td>
+                  <td>{formatarCPF(c.cpf) || "—"}</td>
                   <td>{enderecoTexto(c)}</td>
                   <td>{c.nucleo?.whatsapp || "—"}</td>
-                  <td>{c.atendimento?.data || "—"}</td>
+                  <td>{formatarDataBR(c.atendimento?.data || "") || "—"}</td>
                   <td>{c.atendimento?.relato || "—"}</td>
                   <td>
                     <Link className="ghost" to={`/cadastro?id=${c.id}`}>

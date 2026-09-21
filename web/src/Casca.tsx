@@ -19,7 +19,7 @@ export function Casca() {
       <header className="chrome">
         <span className="brand">
           <Logo />
-          <strong>Cadastro de Assistidos</strong>
+          <span className="brand-app">Cadastro de Assistidos</span>
         </span>
         <nav className="nav" aria-label="Principal">
           <NavLink to="/cadastro">

@@ -35,6 +35,14 @@ func (s *Postgres) Close() {
 	s.pool.Close()
 }
 
+func formatarNascimentoNull(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	n := t.Time
+	return formatarNascimento(&n)
+}
+
 func (s *Postgres) Migrate(ctx context.Context, sql string) error {
 	_, err := s.pool.Exec(ctx, sql)
 	return err
@@ -170,12 +178,16 @@ func (s *Postgres) CriarCadastro(ctx context.Context, in CadastroNovo) (Cadastro
 	} else {
 		unidade = in.UnidadeID
 	}
+	var nasc any
+	if in.DataNascimento != nil {
+		nasc = *in.DataNascimento
+	}
 	var assistidoID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO assistidos (nucleo_id, nome, cpf, unidade_id, estrangeiro, pais_origem)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO assistidos (nucleo_id, nome, cpf, unidade_id, estrangeiro, pais_origem, data_nascimento, profissao)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id::text
-	`, nucleoID, in.Nome, in.CPF, unidade, in.Estrangeiro, in.PaisOrigem).Scan(&assistidoID)
+	`, nucleoID, in.Nome, in.CPF, unidade, in.Estrangeiro, in.PaisOrigem, nasc, in.Profissao).Scan(&assistidoID)
 	if err != nil {
 		if strings.Contains(err.Error(), "assistidos_cpf_unico") {
 			return Cadastro{}, ErrCPFDuplicado
@@ -204,7 +216,7 @@ func gravarOficinas(ctx context.Context, tx pgx.Tx, assistidoID string, oficinas
 		return err
 	}
 	for _, of := range oficinas {
-		if _, err := tx.Exec(ctx, `INSERT INTO assistido_oficinas (assistido_id, oficin-id) VALUES ($1, $2)`, assistidoID, of); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO assistido_oficinas (assistido_id, oficina_id) VALUES ($1, $2)`, assistidoID, of); err != nil {
 			return err
 		}
 	}
@@ -231,9 +243,13 @@ func (s *Postgres) AtualizarCadastro(ctx context.Context, id string, in Cadastro
 	} else {
 		unidade = in.UnidadeID
 	}
+	var nasc any
+	if in.DataNascimento != nil {
+		nasc = *in.DataNascimento
+	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE assistidos SET nome = $2, cpf = $3, unidade_id = $4, estrangeiro = $5, pais_origem = $6 WHERE id = $1
-	`, id, in.Nome, in.CPF, unidade, in.Estrangeiro, in.PaisOrigem)
+		UPDATE assistidos SET nome = $2, cpf = $3, unidade_id = $4, estrangeiro = $5, pais_origem = $6, data_nascimento = $7, profissao = $8 WHERE id = $1
+	`, id, in.Nome, in.CPF, unidade, in.Estrangeiro, in.PaisOrigem, nasc, in.Profissao)
 	if err != nil {
 		if strings.Contains(err.Error(), "assistidos_cpf_unico") {
 			return Cadastro{}, ErrCPFDuplicado
@@ -275,12 +291,11 @@ func (s *Postgres) LerCadastro(ctx context.Context, id string) (Cadastro, error)
 	var c Cadastro
 	var unidadeID sql.NullString
 	var nucleoID string
-	var estrangeiro bool
-	var paisOrigem string
+	var nasc sql.NullTime
 
 	err := s.pool.QueryRow(ctx, `
 		SELECT a.id::text, a.nucleo_id::text, a.nome, a.cpf, a.unidade_id,
-		       a.estrangeiro, a.pais_origem,
+		       a.estrangeiro, a.pais_origem, a.data_nascimento, a.profissao,
 		       t.id::text, to_char(t.data, 'YYYY-MM-DD'), t.relato, t.itens_entregues
 		FROM assistidos a
 		JOIN LATERAL (
@@ -288,7 +303,7 @@ func (s *Postgres) LerCadastro(ctx context.Context, id string) (Cadastro, error)
 		) t ON true
 		WHERE a.id = $1
 	`, id).Scan(&c.ID, &nucleoID, &c.Nome, &c.CPF, &unidadeID,
-		&estrangeiro, &paisOrigem,
+		&c.Estrangeiro, &c.PaisOrigem, &nasc, &c.Profissao,
 		&c.Atendimento.ID, &c.Atendimento.Data, &c.Atendimento.Relato, &c.Atendimento.ItensEntregues,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -299,8 +314,7 @@ func (s *Postgres) LerCadastro(ctx context.Context, id string) (Cadastro, error)
 	}
 	c.NucleoID = nucleoID
 	c.UnidadeID = unidadeID.String
-	c.Estrangeiro = estrangeiro
-	c.PaisOrigem = paisOrigem
+	c.DataNascimento = formatarNascimentoNull(nasc)
 
 	ofs, err := s.oficinasDoAssistido(ctx, c.ID)
 	if err != nil {
@@ -333,7 +347,7 @@ func (s *Postgres) Catalogos(ctx context.Context) (Catalogos, error) {
 func (s *Postgres) ListarCadastros(ctx context.Context) ([]Cadastro, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id::text, a.nucleo_id::text, a.nome, a.cpf, COALESCE(a.unidade_id, ''),
-		       a.estrangeiro, a.pais_origem,
+		       a.estrangeiro, a.pais_origem, a.data_nascimento, a.profissao,
 		       t.id::text, to_char(t.data, 'YYYY-MM-DD'), t.relato, t.itens_entregues,
 		       n.responsavel_legal, n.whatsapp, n.cesta,
 		       n.logradouro, n.numero, n.complemento, n.bairro, n.cidade, n.uf, n.cep
@@ -352,10 +366,9 @@ func (s *Postgres) ListarCadastros(ctx context.Context) ([]Cadastro, error) {
 	for rows.Next() {
 		var c Cadastro
 		var unidadeID sql.NullString
-		var estrangeiro bool
-		var paisOrigem string
+		var nasc sql.NullTime
 		if err := rows.Scan(&c.ID, &c.NucleoID, &c.Nome, &c.CPF, &unidadeID,
-			&estrangeiro, &paisOrigem,
+			&c.Estrangeiro, &c.PaisOrigem, &nasc, &c.Profissao,
 			&c.Atendimento.ID, &c.Atendimento.Data, &c.Atendimento.Relato, &c.Atendimento.ItensEntregues,
 			&c.Nucleo.ResponsavelLegal, &c.Nucleo.WhatsApp, &c.Nucleo.Cesta,
 			&c.Nucleo.Endereco.Logradouro, &c.Nucleo.Endereco.Numero, &c.Nucleo.Endereco.Complemento,
@@ -364,8 +377,7 @@ func (s *Postgres) ListarCadastros(ctx context.Context) ([]Cadastro, error) {
 			return nil, err
 		}
 		c.UnidadeID = unidadeID.String
-		c.Estrangeiro = estrangeiro
-		c.PaisOrigem = paisOrigem
+		c.DataNascimento = formatarNascimentoNull(nasc)
 		ofs, err := s.oficinasDoAssistido(ctx, c.ID)
 		if err != nil {
 			return nil, err
@@ -389,11 +401,8 @@ func (s *Postgres) ConsultarCadastros(ctx context.Context, f ConsultaFiltro) (Co
 		if f.UnidadeID != "" && c.UnidadeID != f.UnidadeID {
 			continue
 		}
-		if q != "" {
-			blob := strings.ToLower(c.Nome + " " + c.NomeExibicao + " " + c.CPF + " " + c.Nucleo.ResponsavelLegal)
-			if !strings.Contains(blob, q) {
-				continue
-			}
+		if q != "" && !CadastroCombinaBusca(c, q) {
+			continue
 		}
 		filtrados = append(filtrados, c)
 	}
@@ -459,7 +468,7 @@ func (s *Postgres) ListarAtendimentos(ctx context.Context, assistidoID string) (
 }
 
 func (s *Postgres) oficinasDoAssistido(ctx context.Context, assistidoID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT oficin-id FROM assistido_oficinas WHERE assistido_id = $1 ORDER BY oficin-id`, assistidoID)
+	rows, err := s.pool.Query(ctx, `SELECT oficina_id FROM assistido_oficinas WHERE assistido_id = $1 ORDER BY oficina_id`, assistidoID)
 	if err != nil {
 		return nil, err
 	}

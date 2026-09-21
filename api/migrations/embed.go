@@ -25,6 +25,10 @@ func CatalogoCrud() string {
 	return must("005_catalogo_crud.sql")
 }
 
+func NascimentoProfissao() string {
+	return must("006_nascimento_profissao.sql")
+}
+
 func must(name string) string {
 	b, err := SQL.ReadFile(name)
 	if err != nil {

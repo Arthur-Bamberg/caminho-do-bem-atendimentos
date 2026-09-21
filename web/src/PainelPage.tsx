@@ -64,7 +64,7 @@ export function PainelPage() {
   return (
     <section className="card painel">
       <h1>Painel de indicadores</h1>
-      <p className="lede">Contagens da API. Famílias são Núcleos; Cesta conta uma vez por Núcleo. Aluno é Assistido com Oficina vigente.</p>
+      <p className="lede">Contagens da API. Famílias são Núcleos Familiares; Cesta conta uma vez por Núcleo Familiar. Aluno é Assistido com Oficina vigente.</p>
       <div className="consulta-filtros">
         <label className="field">
           <span>Unidade</span>

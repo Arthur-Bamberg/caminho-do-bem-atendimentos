@@ -4,6 +4,7 @@ import {
   atualizarCadastro,
   buscarNucleos,
   criarCadastro,
+  consultarCEP,
   lerCadastro,
   lerCatalogos,
   listarCadastros,
@@ -11,17 +12,10 @@ import {
   type Catalogos,
   type NucleoLista,
 } from "./api";
+import { dataBRParaISO, ehMaiorDeIdade, hojeBR, isoParaDataBR, mascararCEP, mascararCPF, mascararData, soDigitos } from "./formatacao";
 
 function enderecoVazio() {
   return { logradouro: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "", cep: "" };
-}
-
-function hojeISO() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 export function CadastroPage() {
@@ -32,17 +26,22 @@ export function CadastroPage() {
   const [cpf, setCpf] = useState("");
   const [estrangeiro, setEstrangeiro] = useState(false);
   const [paisOrigem, setPaisOrigem] = useState("");
+  const [dataNascimento, setDataNascimento] = useState("");
+  const [profissao, setProfissao] = useState("");
   const [unidadeId, setUnidadeId] = useState("");
   const [oficinas, setOficinas] = useState<string[]>([]);
   const [responsavel, setResponsavel] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [cesta, setCesta] = useState(false);
   const [endereco, setEndereco] = useState(enderecoVazio);
-  const [data, setData] = useState(hojeISO);
+  const [data, setData] = useState(hojeBR);
   const [relato, setRelato] = useState("");
   const [itens, setItens] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erroCpf, setErroCpf] = useState("");
+  const [erroCep, setErroCep] = useState("");
+  const [erroData, setErroData] = useState("");
+  const [erroNascimento, setErroNascimento] = useState("");
   const [resumo, setResumo] = useState("");
   const [salvo, setSalvo] = useState<Cadastro | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -52,6 +51,7 @@ export function CadastroPage() {
   const [nucleosEncontrados, setNucleosEncontrados] = useState<NucleoLista[]>([]);
   const [nucleoId, setNucleoId] = useState("");
   const resumoRef = useRef<HTMLDivElement>(null);
+  const cepAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     listarCadastros().then((res) => {
@@ -69,17 +69,20 @@ export function CadastroPage() {
       const c = res.data;
       setEditandoId(c.id);
       setNome(c.nome);
-      setCpf(c.cpf);
+      setCpf(mascararCPF(c.cpf));
       setEstrangeiro(c.estrangeiro);
       setPaisOrigem(c.pais_origem);
+      setDataNascimento(c.data_nascimento ? isoParaDataBR(c.data_nascimento) : "");
+      setProfissao(c.profissao ?? "");
       setUnidadeId(c.unidade_id);
       setOficinas(c.oficinas ?? []);
       setNucleoId(c.nucleo.id);
       setResponsavel(c.nucleo.responsavel_legal);
       setWhatsapp(c.nucleo.whatsapp);
       setCesta(c.nucleo.cesta);
-      setEndereco({ ...enderecoVazio(), ...c.nucleo.endereco });
-      setData(hojeISO());
+      setEndereco({ ...enderecoVazio(), ...c.nucleo.endereco, cep: mascararCEP(c.nucleo.endereco?.cep ?? "") });
+      setErroCep("");
+      setData(hojeBR());
       setRelato("");
       setItens("");
       setSalvo(c);
@@ -92,16 +95,21 @@ export function CadastroPage() {
     setCpf("");
     setEstrangeiro(false);
     setPaisOrigem("");
+    setDataNascimento("");
+    setProfissao("");
     setUnidadeId("");
     setOficinas([]);
     setResponsavel("");
     setWhatsapp("");
     setCesta(false);
     setEndereco(enderecoVazio());
-    setData(hojeISO());
+    setData(hojeBR());
     setRelato("");
     setItens("");
     setErroCpf("");
+    setErroCep("");
+    setErroData("");
+    setErroNascimento("");
     setResumo("");
     setNucleoId("");
     setBuscaNucleo("");
@@ -113,17 +121,75 @@ export function CadastroPage() {
     setOficinas((atual) => (atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]));
   }
 
+  async function onCepChange(valor: string) {
+    const mascarado = mascararCEP(valor);
+    setEndereco((atual) => ({ ...atual, cep: mascarado }));
+    const d = soDigitos(mascarado);
+    if (d.length !== 8) {
+      setErroCep("");
+      cepAbort.current?.abort();
+      return;
+    }
+    cepAbort.current?.abort();
+    const ac = new AbortController();
+    cepAbort.current = ac;
+    try {
+      const res = await consultarCEP(d, { signal: ac.signal });
+      if (ac.signal.aborted) return;
+      if (!res.ok) {
+        setErroCep(res.data && "erro" in res.data && res.data.erro ? String(res.data.erro) : "CEP não encontrado.");
+        return;
+      }
+      setErroCep("");
+      setEndereco((atual) => {
+        if (soDigitos(atual.cep) !== d) return atual;
+        return {
+          ...atual,
+          logradouro: res.data.logradouro,
+          bairro: res.data.bairro,
+          cidade: res.data.cidade,
+          uf: res.data.uf,
+          cep: mascararCEP(res.data.cep || d),
+        };
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setErroCep("Não foi possível consultar o CEP.");
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (enviando) return;
     setEnviando(true);
     setErroCpf("");
+    setErroData("");
+    setErroNascimento("");
     setResumo("");
+    const dataISO = dataBRParaISO(data);
+    if (dataISO === null) {
+      setEnviando(false);
+      setErroData("Data inválida.");
+      setResumo("Data inválida.");
+      queueMicrotask(() => resumoRef.current?.focus());
+      return;
+    }
+    const nascISO = dataBRParaISO(dataNascimento);
+    if (nascISO === null) {
+      setEnviando(false);
+      setErroNascimento("Data inválida.");
+      setResumo("Data de nascimento inválida.");
+      queueMicrotask(() => resumoRef.current?.focus());
+      return;
+    }
+    const mostrarProfissao = nascISO !== "" && ehMaiorDeIdade(nascISO);
     const body = {
       nome,
-      cpf,
+      cpf: soDigitos(cpf),
       estrangeiro,
       pais_origem: estrangeiro ? paisOrigem : "",
+      data_nascimento: nascISO,
+      profissao: mostrarProfissao ? profissao : "",
       unidade_id: unidadeId,
       oficinas,
       nucleo: {
@@ -133,7 +199,7 @@ export function CadastroPage() {
         cesta,
         endereco,
       },
-      atendimento: { data, relato, itens_entregues: itens },
+      atendimento: { data: dataISO, relato, itens_entregues: itens },
     };
     const res = editandoId ? await atualizarCadastro(editandoId, body) : await criarCadastro(body);
     setEnviando(false);
@@ -141,6 +207,11 @@ export function CadastroPage() {
       const msg = res.data && "erro" in res.data ? String(res.data.erro) : "Não foi possível salvar.";
       if (res.data && "campo" in res.data && res.data.campo === "cpf") {
         setErroCpf(msg);
+      }
+      if (res.data && "campo" in res.data && res.data.campo === "data_nascimento") {
+        setErroNascimento(msg);
+      } else if (res.data && "campo" in res.data && String(res.data.campo).includes("data")) {
+        setErroData(msg);
       }
       setResumo(msg);
       queueMicrotask(() => resumoRef.current?.focus());
@@ -152,6 +223,8 @@ export function CadastroPage() {
     setCpf("");
     setEstrangeiro(false);
     setPaisOrigem("");
+    setDataNascimento("");
+    setProfissao("");
     setNucleoId("");
     setResponsavel("");
     setWhatsapp("");
@@ -161,6 +234,9 @@ export function CadastroPage() {
     setEditandoId(null);
     setResumo("");
     setErroCpf("");
+    setErroCep("");
+    setErroData("");
+    setErroNascimento("");
     setBuscaNucleo("");
     setNucleosEncontrados([]);
     navigate("/cadastro");
@@ -171,14 +247,17 @@ export function CadastroPage() {
     });
   }
 
+  const nascISO = dataBRParaISO(dataNascimento);
+  const mostrarProfissao = nascISO !== null && nascISO !== "" && ehMaiorDeIdade(nascISO);
+
   return (
     <section className="card">
       <h1>Cadastro</h1>
-      <p className="lede">Todos os campos são opcionais. Responsável, endereço, WhatsApp e Cesta pertencem ao Núcleo; Unidade e Oficinas, ao Assistido.</p>
+      <p className="lede">Todos os campos são opcionais. Responsável, endereço, WhatsApp e Cesta pertencem ao Núcleo Familiar; Unidade e Oficinas, ao Assistido.</p>
 
       {resumo ? (
         <div className="erro" id="resumo-erros" tabIndex={-1} ref={resumoRef} role="alert">
-          <a href="#cpf">{resumo}</a>
+          <a href={erroCpf ? "#cpf" : erroNascimento ? "#data_nascimento" : "#data"}>{resumo}</a>
         </div>
       ) : null}
 
@@ -213,7 +292,23 @@ export function CadastroPage() {
         </fieldset>
         <label className="field">
           <span>Data do Atendimento</span>
-          <input name="data" type="date" value={data} onChange={(ev) => setData(ev.target.value)} />
+          <input
+            id="data"
+            name="data"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={10}
+            placeholder="dd/mm/aaaa"
+            value={data}
+            onChange={(ev) => setData(mascararData(ev.target.value))}
+            aria-invalid={erroData ? true : undefined}
+            aria-describedby={erroData ? "data-erro" : undefined}
+          />
+          {erroData ? (
+            <p className="erro" id="data-erro">
+              {erroData}
+            </p>
+          ) : null}
         </label>
         <label className="field">
           <span>Itens Entregues</span>
@@ -230,9 +325,10 @@ export function CadastroPage() {
             name="cpf"
             inputMode="numeric"
             autoComplete="off"
+            maxLength={14}
+            placeholder="000.000.000-00"
             value={cpf}
-            onChange={(ev) => setCpf(ev.target.value)}
-            placeholder="somente se houver"
+            onChange={(ev) => setCpf(mascararCPF(ev.target.value))}
             aria-invalid={erroCpf ? true : undefined}
             aria-describedby={erroCpf ? "cpf-erro" : undefined}
           />
@@ -265,7 +361,39 @@ export function CadastroPage() {
           </label>
         ) : null}
         <label className="field">
-          <span>Buscar Núcleo existente</span>
+          <span>Data de Nascimento</span>
+          <input
+            id="data_nascimento"
+            name="data_nascimento"
+            inputMode="numeric"
+            autoComplete="bday"
+            maxLength={10}
+            placeholder="dd/mm/aaaa"
+            value={dataNascimento}
+            onChange={(ev) => setDataNascimento(mascararData(ev.target.value))}
+            aria-invalid={erroNascimento ? true : undefined}
+            aria-describedby={erroNascimento ? "data-nascimento-erro" : undefined}
+          />
+          {erroNascimento ? (
+            <p className="erro" id="data-nascimento-erro">
+              {erroNascimento}
+            </p>
+          ) : null}
+        </label>
+        {mostrarProfissao ? (
+          <label className="field">
+            <span>Profissão</span>
+            <input
+              name="profissao"
+              value={profissao}
+              onChange={(ev) => setProfissao(ev.target.value)}
+              placeholder="somente se maior de 18 anos"
+              autoComplete="organization-title"
+            />
+          </label>
+        ) : null}
+        <label className="field">
+          <span>Buscar Núcleo Familiar existente</span>
           <input
             value={buscaNucleo}
             onChange={(ev) => setBuscaNucleo(ev.target.value)}
@@ -281,7 +409,7 @@ export function CadastroPage() {
               if (res.ok) setNucleosEncontrados(res.data.itens ?? []);
             }}
           >
-            Buscar Núcleo
+            Buscar Núcleo Familiar
           </button>
           {nucleoId ? (
             <button
@@ -292,11 +420,11 @@ export function CadastroPage() {
                 setNucleosEncontrados([]);
               }}
             >
-              Desvincular Núcleo
+              Desvincular Núcleo Familiar
             </button>
           ) : null}
         </div>
-        {nucleoId ? <p className="ok">Vinculado ao Núcleo {nucleoId.slice(0, 8)}…</p> : null}
+        {nucleoId ? <p className="ok">Vinculado ao Núcleo Familiar {nucleoId.slice(0, 8)}…</p> : null}
         {nucleosEncontrados.length > 0 ? (
           <ul className="lista-minima">
             {nucleosEncontrados.map((n) => (
@@ -309,7 +437,8 @@ export function CadastroPage() {
                     setResponsavel(n.responsavel_legal);
                     setWhatsapp(n.whatsapp);
                     setCesta(n.cesta);
-                    setEndereco({ ...enderecoVazio(), ...n.endereco });
+                    setEndereco({ ...enderecoVazio(), ...n.endereco, cep: mascararCEP(n.endereco?.cep ?? "") });
+                    setErroCep("");
                   }}
                 >
                   Escolher: {n.responsavel_legal || "Sem responsável"} ({n.assistidos} assistidos)
@@ -324,14 +453,34 @@ export function CadastroPage() {
         </label>
         <label className="field">
           <span>WhatsApp</span>
-          <input name="whatsapp" inputMode="tel" value={whatsapp} onChange={(ev) => setWhatsapp(ev.target.value)} placeholder="do Núcleo" />
+          <input name="whatsapp" inputMode="tel" value={whatsapp} onChange={(ev) => setWhatsapp(ev.target.value)} placeholder="do Núcleo Familiar" />
         </label>
         <label className="check nucleo-cesta">
           <input type="checkbox" checked={cesta} onChange={(ev) => setCesta(ev.target.checked)} />
           <span>Cesta Básica (está na lista agora)</span>
         </label>
         <fieldset className="field oficinas">
-          <legend>Endereço do Núcleo</legend>
+          <legend>Endereço do Núcleo Familiar</legend>
+          <label className="field">
+            <span>CEP</span>
+            <input
+              id="cep"
+              name="cep"
+              inputMode="numeric"
+              autoComplete="postal-code"
+              maxLength={9}
+              placeholder="00000-000"
+              value={endereco.cep}
+              onChange={(ev) => void onCepChange(ev.target.value)}
+              aria-invalid={erroCep ? true : undefined}
+              aria-describedby={erroCep ? "cep-erro" : undefined}
+            />
+            {erroCep ? (
+              <p className="erro" id="cep-erro">
+                {erroCep}
+              </p>
+            ) : null}
+          </label>
           <label className="field">
             <span>Logradouro</span>
             <input value={endereco.logradouro} onChange={(ev) => setEndereco({ ...endereco, logradouro: ev.target.value })} />
@@ -358,10 +507,6 @@ export function CadastroPage() {
             <label className="field">
               <span>UF</span>
               <input value={endereco.uf} onChange={(ev) => setEndereco({ ...endereco, uf: ev.target.value })} maxLength={2} />
-            </label>
-            <label className="field">
-              <span>CEP</span>
-              <input value={endereco.cep} onChange={(ev) => setEndereco({ ...endereco, cep: ev.target.value })} />
             </label>
           </div>
         </fieldset>

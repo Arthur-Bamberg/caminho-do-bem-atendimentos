@@ -90,6 +90,17 @@ func TestRelatoEItensFicamNoAtendimento(t *testing.T) {
 	}
 }
 
+func TestAtendimentoAceitaDataBR(t *testing.T) {
+	h := setup(t)
+	c := postCadastro(t, h, map[string]any{
+		"atendimento": map[string]any{"data": "01/09/2026"},
+	})
+	at := c["atendimento"].(map[string]any)
+	if at["data"] != "2026-09-01" {
+		t.Fatalf("data %v", at["data"])
+	}
+}
+
 func TestListaMinimaSemNome(t *testing.T) {
 	h := setup(t)
 	_ = postCadastro(t, h, map[string]any{})
@@ -224,7 +235,7 @@ func TestEstrangeiroEPaisOrigem(t *testing.T) {
 
 	// Case 1: estrangeiro = true, pais_origem provided
 	c1 := postCadastro(t, h, map[string]any{
-		"estrangeiro":  true,
+		"estrangeiro": true,
 		"pais_origem": "Paraguai",
 	})
 	if c1["estrangeiro"] != true || c1["pais_origem"] != "Paraguai" {
@@ -274,5 +285,58 @@ func TestEstrangeiroEPaisOrigem(t *testing.T) {
 	})
 	if updatedC2["estrangeiro"] != true || updatedC2["pais_origem"] != "Chile" {
 		t.Fatalf("Update case 2 failed: %#v", updatedC2)
+	}
+}
+
+func TestDataNascimentoEProfissao(t *testing.T) {
+	h := setup(t)
+	hoje := time.Now().In(fusoBrasil())
+	adulto := hoje.AddDate(-20, 0, 0).Format("2006-01-02")
+	menor := hoje.AddDate(-10, 0, 0).Format("2006-01-02")
+	maioridade := hoje.AddDate(-18, 0, 0).Format("2006-01-02")
+
+	vazio := postCadastro(t, h, map[string]any{"profissao": "pedreiro"})
+	if vazio["data_nascimento"] != "" || vazio["profissao"] != "" {
+		t.Fatalf("sem nascimento não grava profissão: %#v", vazio)
+	}
+
+	crianca := postCadastro(t, h, map[string]any{
+		"data_nascimento": menor,
+		"profissao":       "pedreiro",
+	})
+	if crianca["data_nascimento"] != menor || crianca["profissao"] != "" {
+		t.Fatalf("menor de 18 não grava profissão: %#v", crianca)
+	}
+
+	exato := postCadastro(t, h, map[string]any{
+		"data_nascimento": maioridade,
+		"profissao":       "costureira",
+	})
+	if exato["data_nascimento"] != maioridade || exato["profissao"] != "costureira" {
+		t.Fatalf("18 anos grava profissão: %#v", exato)
+	}
+
+	adultoC := postCadastro(t, h, map[string]any{
+		"data_nascimento": adulto,
+		"profissao":       "pedreiro",
+	})
+	if adultoC["data_nascimento"] != adulto || adultoC["profissao"] != "pedreiro" {
+		t.Fatalf("adulto grava profissão: %#v", adultoC)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/assistidos", jsonBody(map[string]any{"data_nascimento": "31/02/2000"}))
+	req.AddCookie(loginCookie(t, h))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("data inválida status %d %s", rec.Code, rec.Body.String())
+	}
+
+	depois := putCadastro(t, h, adultoC["id"].(string), map[string]any{
+		"data_nascimento": menor,
+		"profissao":       "pedreiro",
+	})
+	if depois["profissao"] != "" {
+		t.Fatalf("atualizar para menor esvazia profissão: %#v", depois)
 	}
 }

@@ -21,6 +21,8 @@ type Server struct {
 	store      store.Store
 	secure     bool
 	novaSessao func() (string, error)
+	httpClient *http.Client
+	viacepBase string
 }
 
 func New(st store.Store) *Server {
@@ -34,6 +36,8 @@ func New(st store.Store) *Server {
 			}
 			return hex.EncodeToString(b), nil
 		},
+		httpClient: &http.Client{Timeout: 4 * time.Second},
+		viacepBase: "https://viacep.com.br",
 	}
 }
 
@@ -50,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/assistidos/{id}", s.requerSessao(s.lerCadastro))
 	mux.HandleFunc("GET /api/assistidos/{id}/atendimentos", s.requerSessao(s.listarAtendimentos))
 	mux.HandleFunc("PUT /api/assistidos/{id}", s.requerSessao(s.atualizarCadastro))
+	mux.HandleFunc("GET /api/cep/{cep}", s.requerSessao(s.consultarCEP))
 	mux.HandleFunc("GET /api/nucleos", s.requerSessao(s.buscarNucleos))
 	mux.HandleFunc("GET /api/nucleos/{id}", s.requerSessao(s.lerNucleo))
 	mux.HandleFunc("GET /api/indicadores", s.requerSessao(s.indicadores))

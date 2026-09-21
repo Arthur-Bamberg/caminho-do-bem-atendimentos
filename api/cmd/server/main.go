@@ -46,6 +46,9 @@ func main() {
 		if err := st.Migrate(ctx, migrations.CatalogoCrud()); err != nil {
 			log.Fatal(err)
 		}
+		if err := st.Migrate(ctx, migrations.NascimentoProfissao()); err != nil {
+			log.Fatal(err)
+		}
 		if err := st.SeedOperador(ctx, email, senha); err != nil {
 			log.Fatal(err)
 		}

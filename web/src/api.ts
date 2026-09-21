@@ -55,6 +55,8 @@ export type Cadastro = {
   cpf: string;
   estrangeiro: boolean;
   pais_origem: string;
+  data_nascimento: string;
+  profissao: string;
   unidade_id: string;
   oficinas: string[];
   aluno: boolean;
@@ -92,6 +94,8 @@ export type CadastroPedido = {
   cpf: string;
   estrangeiro: boolean;
   pais_origem: string;
+  data_nascimento: string;
+  profissao: string;
   unidade_id: string;
   oficinas: string[];
   nucleo: {
@@ -134,6 +138,18 @@ export function consultarCadastros(params: { q?: string; unidade_id?: string; pa
 
 export function lerCadastro(id: string) {
   return api<Cadastro & ErroCampo>(`/api/assistidos/${id}`);
+}
+
+export type EnderecoCEP = {
+  logradouro: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+};
+
+export function consultarCEP(cep: string, init: RequestInit = {}) {
+  return api<EnderecoCEP & ErroCampo>(`/api/cep/${cep}`, init);
 }
 
 export type SerieIndicador = { id: string; nome: string; quantidade: number };

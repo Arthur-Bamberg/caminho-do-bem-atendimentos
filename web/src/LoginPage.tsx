@@ -30,9 +30,9 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <form className="card" onSubmit={onSubmit} noValidate>
-        <div className="brand" style={{ marginBottom: 16 }}>
+        <div className="brand login-brand">
           <Logo />
-          <strong>Cadastro de Assistidos</strong>
+          <span className="brand-app">Cadastro de Assistidos</span>
         </div>
         <h1>Entrar</h1>
         <p className="lede">Somente Operadores provisionados acessam fichas e o painel.</p>

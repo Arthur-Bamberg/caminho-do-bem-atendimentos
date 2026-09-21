@@ -67,7 +67,7 @@ func (s *Server) consultaPDF(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("total=%d pagina=%d por_pagina=%d", res.Total, res.Pagina, res.PorPagina),
 	}
 	for _, c := range res.Itens {
-		linhas = append(linhas, fmt.Sprintf("%s | %s | %s", c.NomeExibicao, c.UnidadeID, c.CPF))
+		linhas = append(linhas, fmt.Sprintf("%s | %s | %s | %s", c.NomeExibicao, c.UnidadeID, store.FormatCPF(c.CPF), store.FormatDataBR(c.Atendimento.Data)))
 	}
 	enviarPDF(w, "consulta.pdf", linhas)
 }

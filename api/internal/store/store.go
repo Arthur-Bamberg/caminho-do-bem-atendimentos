@@ -9,14 +9,14 @@ import (
 )
 
 var (
-	ErrCredenciaisInvalidas = errors.New("credenciais inválidas")
-	ErrSessaoInvalida       = errors.New("sessão inválida")
-	ErrCPFDuplicado         = errors.New("CPF já cadastrado")
-	ErrCPFInvalido          = errors.New("CPF inválido")
-	ErrUnidadeInvalida      = errors.New("Unidade inválida")
-	ErrOficinaInvalida      = errors.New("Oficina inválida")
+	ErrCredenciaisInvalidas  = errors.New("credenciais inválidas")
+	ErrSessaoInvalida        = errors.New("sessão inválida")
+	ErrCPFDuplicado          = errors.New("CPF já cadastrado")
+	ErrCPFInvalido           = errors.New("CPF inválido")
+	ErrUnidadeInvalida       = errors.New("Unidade inválida")
+	ErrOficinaInvalida       = errors.New("Oficina inválida")
 	ErrCadastroNaoEncontrado = errors.New("Cadastro não encontrado")
-	ErrNucleoNaoEncontrado   = errors.New("Núcleo não encontrado")
+	ErrNucleoNaoEncontrado   = errors.New("Núcleo Familiar não encontrado")
 )
 
 type Operador struct {
@@ -31,14 +31,16 @@ type AtendimentoNovo struct {
 }
 
 type CadastroNovo struct {
-	Nome        string
-	CPF         string
-	UnidadeID   string
-	Oficinas    []string
-	Nucleo      NucleoNovo
-	Estrangeiro bool
-	PaisOrigem  string
-	Atendimento AtendimentoNovo
+	Nome           string
+	CPF            string
+	UnidadeID      string
+	Oficinas       []string
+	Nucleo         NucleoNovo
+	Estrangeiro    bool
+	PaisOrigem     string
+	DataNascimento *time.Time
+	Profissao      string
+	Atendimento    AtendimentoNovo
 }
 
 type NucleoNovo struct {
@@ -80,25 +82,27 @@ type Atendimento struct {
 }
 
 type Cadastro struct {
-	ID           string      `json:"id"`
-	NucleoID     string      `json:"nucleo_id"`
-	Nome         string      `json:"nome"`
-	NomeExibicao string      `json:"nome_exibicao"`
-	CPF          string      `json:"cpf"`
-	UnidadeID    string      `json:"unidade_id"`
-	Oficinas     []string    `json:"oficinas"`
-	Aluno        bool        `json:"aluno"`
-	Estrangeiro  bool        `json:"estrangeiro"`
-	PaisOrigem   string      `json:"pais_origem"`
-	Nucleo       Nucleo      `json:"nucleo"`
-	Atendimento  Atendimento `json:"atendimento"`
+	ID             string      `json:"id"`
+	NucleoID       string      `json:"nucleo_id"`
+	Nome           string      `json:"nome"`
+	NomeExibicao   string      `json:"nome_exibicao"`
+	CPF            string      `json:"cpf"`
+	UnidadeID      string      `json:"unidade_id"`
+	Oficinas       []string    `json:"oficinas"`
+	Aluno          bool        `json:"aluno"`
+	Estrangeiro    bool        `json:"estrangeiro"`
+	PaisOrigem     string      `json:"pais_origem"`
+	DataNascimento string      `json:"data_nascimento"`
+	Profissao      string      `json:"profissao"`
+	Nucleo         Nucleo      `json:"nucleo"`
+	Atendimento    Atendimento `json:"atendimento"`
 }
 
 type ConsultaFiltro struct {
-	Q          string
-	UnidadeID  string
-	Pagina     int
-	PorPagina  int
+	Q         string
+	UnidadeID string
+	Pagina    int
+	PorPagina int
 }
 
 type ConsultaResultado struct {
@@ -137,6 +141,31 @@ type Store interface {
 	GetOficina(ctx context.Context, id string) (Oficina, error)
 }
 
+func IdadeAnos(nasc, hoje time.Time) int {
+	hoje = time.Date(hoje.Year(), hoje.Month(), hoje.Day(), 0, 0, 0, 0, hoje.Location())
+	nasc = time.Date(nasc.Year(), nasc.Month(), nasc.Day(), 0, 0, 0, 0, hoje.Location())
+	idade := hoje.Year() - nasc.Year()
+	aniversario := time.Date(hoje.Year(), nasc.Month(), nasc.Day(), 0, 0, 0, 0, hoje.Location())
+	if hoje.Before(aniversario) {
+		idade--
+	}
+	return idade
+}
+
+func EhMaiorDeIdade(nasc *time.Time, hoje time.Time) bool {
+	if nasc == nil || nasc.IsZero() {
+		return false
+	}
+	return IdadeAnos(*nasc, hoje) >= 18
+}
+
+func ProfissaoDoAssistido(nasc *time.Time, profissao string, hoje time.Time) string {
+	if !EhMaiorDeIdade(nasc, hoje) {
+		return ""
+	}
+	return strings.TrimSpace(profissao)
+}
+
 func NomeExibicao(nome string) string {
 	if strings.TrimSpace(nome) == "" {
 		return "Sem nome"
@@ -159,4 +188,54 @@ func NormalizarCPF(cpf string) (string, error) {
 		return "", ErrCPFInvalido
 	}
 	return n, nil
+}
+
+func FormatCPF(cpf string) string {
+	n, err := NormalizarCPF(cpf)
+	if err != nil || n == "" {
+		return strings.TrimSpace(cpf)
+	}
+	return n[:3] + "." + n[3:6] + "." + n[6:9] + "-" + n[9:]
+}
+
+func FormatDataBR(iso string) string {
+	iso = strings.TrimSpace(iso)
+	if len(iso) < 10 {
+		return iso
+	}
+	return iso[8:10] + "/" + iso[5:7] + "/" + iso[:4]
+}
+
+func CadastroCombinaBusca(c Cadastro, q string) bool {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return true
+	}
+	compact := compactarBusca(q)
+	if soDigitos(compact) == compact && compact != "" {
+		return strings.Contains(c.CPF, compact)
+	}
+	blob := strings.ToLower(c.Nome + " " + c.NomeExibicao + " " + c.CPF + " " + FormatCPF(c.CPF) + " " + c.Nucleo.ResponsavelLegal)
+	return strings.Contains(blob, q)
+}
+
+func compactarBusca(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '.' || r == '-' || unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+func soDigitos(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

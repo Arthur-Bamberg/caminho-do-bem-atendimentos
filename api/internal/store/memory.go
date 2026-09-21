@@ -145,7 +145,7 @@ func (m *Memory) CriarCadastro(_ context.Context, in CadastroNovo) (Cadastro, er
 	if err != nil {
 		return Cadastro{}, err
 	}
-	
+
 	if in.UnidadeID != "" {
 		u, ok := m.unidades[in.UnidadeID]
 		if !ok {
@@ -219,16 +219,18 @@ func montarCadastro(id, nucleoID, atID string, in CadastroNovo) Cadastro {
 		ofs = []string{}
 	}
 	return Cadastro{
-		ID:           id,
-		NucleoID:     nucleoID,
-		Nome:         in.Nome,
-		NomeExibicao: NomeExibicao(in.Nome),
-		CPF:          in.CPF,
-		UnidadeID:    in.UnidadeID,
-		Oficinas:     ofs,
-		Aluno:        EhAluno(ofs),
-		Estrangeiro:  in.Estrangeiro,
-		PaisOrigem:   in.PaisOrigem,
+		ID:             id,
+		NucleoID:       nucleoID,
+		Nome:           in.Nome,
+		NomeExibicao:   NomeExibicao(in.Nome),
+		CPF:            in.CPF,
+		UnidadeID:      in.UnidadeID,
+		Oficinas:       ofs,
+		Aluno:          EhAluno(ofs),
+		Estrangeiro:    in.Estrangeiro,
+		PaisOrigem:     in.PaisOrigem,
+		DataNascimento: formatarNascimento(in.DataNascimento),
+		Profissao:      in.Profissao,
 		Nucleo: Nucleo{
 			ID:               nucleoID,
 			ResponsavelLegal: in.Nucleo.ResponsavelLegal,
@@ -243,6 +245,13 @@ func montarCadastro(id, nucleoID, atID string, in CadastroNovo) Cadastro {
 			ItensEntregues: in.Atendimento.ItensEntregues,
 		},
 	}
+}
+
+func formatarNascimento(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02")
 }
 
 func (m *Memory) AtualizarCadastro(_ context.Context, id string, in CadastroNovo) (Cadastro, error) {
@@ -287,7 +296,7 @@ func (m *Memory) AtualizarCadastro(_ context.Context, id string, in CadastroNovo
 	if err != nil {
 		return Cadastro{}, err
 	}
-	
+
 	atID := newID()
 	in.Nucleo.ResponsavelLegal = nucleo.ResponsavelLegal
 	in.Nucleo.WhatsApp = nucleo.WhatsApp
@@ -464,11 +473,8 @@ func (m *Memory) ConsultarCadastros(ctx context.Context, f ConsultaFiltro) (Cons
 		if f.UnidadeID != "" && c.UnidadeID != f.UnidadeID {
 			continue
 		}
-		if q != "" {
-			blob := strings.ToLower(c.Nome + " " + c.NomeExibicao + " " + c.CPF + " " + c.Nucleo.ResponsavelLegal)
-			if !strings.Contains(blob, q) {
-				continue
-			}
+		if q != "" && !CadastroCombinaBusca(c, q) {
+			continue
 		}
 		filtrados = append(filtrados, c)
 	}

@@ -11,14 +11,18 @@ import (
 	"github.com/Arthur-Bamberg/nacao-assistidos/api/internal/store"
 )
 
+var errDataInvalida = errors.New("data inválida")
+
 type cadastroPedido struct {
-	Nome        string   `json:"nome"`
-	CPF         string   `json:"cpf"`
-	Estrangeiro bool     `json:"estrangeiro"`
-	PaisOrigem  string   `json:"pais_origem"`
-	UnidadeID   string   `json:"unidade_id"`
-	Oficinas    []string `json:"oficinas"`
-	Nucleo      struct {
+	Nome           string   `json:"nome"`
+	CPF            string   `json:"cpf"`
+	Estrangeiro    bool     `json:"estrangeiro"`
+	PaisOrigem     string   `json:"pais_origem"`
+	DataNascimento string   `json:"data_nascimento"`
+	Profissao      string   `json:"profissao"`
+	UnidadeID      string   `json:"unidade_id"`
+	Oficinas       []string `json:"oficinas"`
+	Nucleo         struct {
 		ID               string         `json:"id"`
 		ResponsavelLegal string         `json:"responsavel_legal"`
 		WhatsApp         string         `json:"whatsapp"`
@@ -128,13 +132,25 @@ func (s *Server) lerPedidoCadastro(w http.ResponseWriter, r *http.Request) (stor
 		writeJSON(w, http.StatusBadRequest, map[string]string{"campo": "atendimento.data", "erro": "data inválida"})
 		return store.CadastroNovo{}, false
 	}
+	nasc, err := dataOpcional(body.DataNascimento)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"campo": "data_nascimento", "erro": "data inválida"})
+		return store.CadastroNovo{}, false
+	}
+	paisOrigem := strings.TrimSpace(body.PaisOrigem)
+	if !body.Estrangeiro {
+		paisOrigem = ""
+	}
+	hoje := time.Now().In(fusoBrasil())
 	return store.CadastroNovo{
-		Nome:        strings.TrimSpace(body.Nome),
-		CPF:         cpf,
-		Estrangeiro: body.Estrangeiro,
-		PaisOrigem:  strings.TrimSpace(body.PaisOrigem),
-		UnidadeID:   body.UnidadeID,
-		Oficinas:    oficinas,
+		Nome:           strings.TrimSpace(body.Nome),
+		CPF:            cpf,
+		Estrangeiro:    body.Estrangeiro,
+		PaisOrigem:     paisOrigem,
+		DataNascimento: nasc,
+		Profissao:      store.ProfissaoDoAssistido(nasc, body.Profissao, hoje),
+		UnidadeID:      body.UnidadeID,
+		Oficinas:       oficinas,
 		Nucleo: store.NucleoNovo{
 			ID:               strings.TrimSpace(body.Nucleo.ID),
 			ResponsavelLegal: strings.TrimSpace(body.Nucleo.ResponsavelLegal),
@@ -209,6 +225,18 @@ func (s *Server) listarAtendimentos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"itens": itens})
 }
 
+func dataOpcional(s string) (*time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	t, err := parseData(s)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 func dataAtendimento(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	loc := fusoBrasil()
@@ -216,11 +244,18 @@ func dataAtendimento(s string) (time.Time, error) {
 		agora := time.Now().In(loc)
 		return time.Date(agora.Year(), agora.Month(), agora.Day(), 0, 0, 0, 0, loc), nil
 	}
-	t, err := time.ParseInLocation("2006-01-02", s, loc)
-	if err != nil {
-		return time.Time{}, err
+	return parseData(s)
+}
+
+func parseData(s string) (time.Time, error) {
+	loc := fusoBrasil()
+	if t, err := time.ParseInLocation("2006-01-02", s, loc); err == nil && t.Format("2006-01-02") == s {
+		return t, nil
 	}
-	return t, nil
+	if t, err := time.ParseInLocation("02/01/2006", s, loc); err == nil && t.Format("02/01/2006") == s {
+		return t, nil
+	}
+	return time.Time{}, errDataInvalida
 }
 
 func fusoBrasil() *time.Location {

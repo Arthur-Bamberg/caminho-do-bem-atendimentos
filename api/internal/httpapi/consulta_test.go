@@ -22,6 +22,10 @@ func TestConsultaBuscaFiltroPaginacao(t *testing.T) {
 	if cpf.Total != 1 {
 		t.Fatalf("cpf %d", cpf.Total)
 	}
+	mascara := consultar(t, h, "q=529.982.247-25")
+	if mascara.Total != 1 {
+		t.Fatalf("cpf máscara %d", mascara.Total)
+	}
 	resp := consultar(t, h, "q=maria")
 	if resp.Total != 1 {
 		t.Fatalf("responsável %d", resp.Total)

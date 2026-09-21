@@ -1,0 +1,2 @@
+ALTER TABLE assistidos ADD COLUMN IF NOT EXISTS data_nascimento DATE;
+ALTER TABLE assistidos ADD COLUMN IF NOT EXISTS profissao TEXT NOT NULL DEFAULT '';
